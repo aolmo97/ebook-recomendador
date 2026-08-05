@@ -49,17 +49,22 @@ async function getClient(): Promise<TelegramClient> {
   return client;
 }
 
-// Si la conexión se cae a mitad de una operación, reconecta una vez y reintenta.
+// Si la operación falla (conexión caída, o el cliente queda en un estado roto
+// tras algo como AUTH_KEY_DUPLICATED — reconectar la MISMA instancia no basta
+// ahí), descartamos el cliente del todo y reintentamos una vez con uno nuevo.
 async function withReconnect<T>(fn: (tg: TelegramClient) => Promise<T>): Promise<T> {
   const tg = await getClient();
   try {
     return await fn(tg);
-  } catch (err) {
-    if (!tg.connected) {
-      await tg.connect();
-      return await fn(tg);
+  } catch {
+    try {
+      await tg.disconnect();
+    } catch {
+      // ya estaba muerta, da igual
     }
-    throw err;
+    client = null;
+    const freshTg = await getClient();
+    return await fn(freshTg);
   }
 }
 
