@@ -201,7 +201,7 @@ function EbookRecomendador:promptTelegramSearch()
                         local query = dialog:getInputText()
                         UIManager:close(dialog)
                         if query and query ~= "" then
-                            self:downloadFromTelegram(query)
+                            self:telegramSearch(query)
                         end
                     end,
                 },
@@ -213,18 +213,23 @@ function EbookRecomendador:promptTelegramSearch()
 end
 
 -- El endpoint /api/books/search puede tardar 15-40s (busca en el bot de
--- Telegram y pulsa el botón Epub en vivo), y devuelve o el epub binario
--- (200) o un JSON de error (404/502/504) — se escribe siempre a un archivo
--- temporal primero porque LuaSocket solo da el código/cabeceras cuando la
--- petición ya terminó. Trapper:wrap + Trapper:info dan un aviso de "cargando"
--- persistente durante esa espera (no hay progreso real en % porque no
--- conocemos el tamaño del epub hasta que la descarga ha terminado).
-function EbookRecomendador:downloadFromTelegram(query)
+-- Telegram y pulsa el botón Epub en vivo). Con un único resultado el
+-- servidor ya baja el epub directo; con varios, devuelve JSON con la lista
+-- de candidatos y aquí se le muestra al usuario para que elija. La
+-- respuesta se escribe siempre a un archivo temporal primero, porque
+-- LuaSocket solo da el código/cabeceras cuando la petición ya ha terminado
+-- del todo — así que decidimos si es epub o JSON mirando el Content-Type
+-- una vez descargado, no antes.
+function EbookRecomendador:telegramSearch(query, command)
     NetworkMgr:runWhenOnline(function()
         Trapper:wrap(function()
             Trapper:info(_("Buscando en tu Telegram… puede tardar hasta 40s."))
 
             local url = self:getServerUrl() .. "/api/books/search?q=" .. self:urlEncode(query)
+            if command then
+                url = url .. "&command=" .. self:urlEncode(command)
+            end
+
             local dir = filemanagerutil.getHomeFolder()
             local tmp_filepath = ffiUtil.joinPath(dir, self:sanitizeFilename(query) .. ".epub.part")
             local file = io.open(tmp_filepath, "wb")
@@ -242,44 +247,74 @@ function EbookRecomendador:downloadFromTelegram(query)
             socketutil:reset_timeout()
             Trapper:clear()
 
-            if code ~= 200 then
-                local err_file = io.open(tmp_filepath, "r")
-                local content = err_file and err_file:read("*a") or ""
-                if err_file then err_file:close() end
-                os.remove(tmp_filepath)
-                local decode_ok, decoded = pcall(JSON.decode, content)
-                local msg = (decode_ok and type(decoded) == "table" and decoded.error)
-                    or T(_("Error buscando en Telegram (%1)."), tostring(code))
-                UIManager:show(InfoMessage:new{ text = msg })
+            local content_type = (headers and (headers["content-type"] or headers["Content-Type"])) or ""
+
+            if content_type:find("epub", 1, true) then
+                local final_filename = self:sanitizeFilename(query) .. ".epub"
+                local disposition = headers and (headers["content-disposition"] or headers["Content-Disposition"])
+                if disposition then
+                    local raw_name = disposition:match('filename="([^"]+)"')
+                    if raw_name then
+                        final_filename = self:sanitizeFilename(self:urlDecode(raw_name))
+                    end
+                end
+                local final_filepath = ffiUtil.joinPath(dir, final_filename)
+                os.remove(final_filepath)
+                os.rename(tmp_filepath, final_filepath)
+
+                if FileManager.instance then
+                    FileManager.instance:onRefresh()
+                end
+
+                UIManager:show(ConfirmBox:new{
+                    text = T(_("Descargado: %1\n\n¿Abrir ahora?"), final_filename),
+                    ok_text = _("Abrir"),
+                    cancel_text = _("Ahora no"),
+                    ok_callback = function()
+                        ReaderUI:showReader(final_filepath)
+                    end,
+                })
                 return
             end
 
-            local final_filename = self:sanitizeFilename(query) .. ".epub"
-            local disposition = headers and (headers["content-disposition"] or headers["Content-Disposition"])
-            if disposition then
-                local raw_name = disposition:match('filename="([^"]+)"')
-                if raw_name then
-                    final_filename = self:sanitizeFilename(self:urlDecode(raw_name))
-                end
-            end
-            local final_filepath = ffiUtil.joinPath(dir, final_filename)
-            os.remove(final_filepath)
-            os.rename(tmp_filepath, final_filepath)
+            -- No es un epub: o es JSON con candidatos, o un JSON/HTML de error.
+            local err_file = io.open(tmp_filepath, "r")
+            local content = err_file and err_file:read("*a") or ""
+            if err_file then err_file:close() end
+            os.remove(tmp_filepath)
 
-            if FileManager.instance then
-                FileManager.instance:onRefresh()
+            local decode_ok, decoded = pcall(JSON.decode, content)
+            if not decode_ok or type(decoded) ~= "table" then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Error buscando en Telegram (%1)."), tostring(code)),
+                })
+                return
             end
 
-            UIManager:show(ConfirmBox:new{
-                text = T(_("Descargado: %1\n\n¿Abrir ahora?"), final_filename),
-                ok_text = _("Abrir"),
-                cancel_text = _("Ahora no"),
-                ok_callback = function()
-                    ReaderUI:showReader(final_filepath)
-                end,
-            })
+            if decoded.status == "candidates" and decoded.candidates and #decoded.candidates > 0 then
+                self:showTelegramCandidates(query, decoded.candidates)
+            else
+                UIManager:show(InfoMessage:new{ text = decoded.error or _("No se encontró el libro.") })
+            end
         end)
     end)
+end
+
+function EbookRecomendador:showTelegramCandidates(query, candidates)
+    local item_table = {}
+    for _idx, candidate in ipairs(candidates) do
+        table.insert(item_table, { text = candidate.label, command = candidate.command })
+    end
+    local candidates_menu
+    candidates_menu = Menu:new{
+        title = _("Elige un libro"),
+        item_table = item_table,
+        onMenuSelect = function(_menu, entry)
+            UIManager:close(candidates_menu)
+            self:telegramSearch(query, entry.command)
+        end,
+    }
+    UIManager:show(candidates_menu)
 end
 
 function EbookRecomendador:runSearch(query)

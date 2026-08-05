@@ -29,26 +29,34 @@ function serveEpub(filePath: string, fileName: string) {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
+  const command = searchParams.get("command")?.trim();
 
   if (!q) {
     return NextResponse.json({ error: "Falta parámetro q" }, { status: 400 });
   }
 
   try {
-    let result = await searchBook(q);
+    let result: BookSearchResult;
 
-    if (result.status === "candidates") {
-      const candidates = result.candidates ?? [];
-      if (candidates.length === 0) {
-        return NextResponse.json({ error: "No se encontró el libro", raw: result.raw }, { status: 404 });
+    if (command) {
+      // El cliente ya eligió un candidato de una búsqueda anterior.
+      result = await sendFollowUp(command, q);
+    } else {
+      result = await searchBook(q);
+
+      if (result.status === "candidates") {
+        const candidates = result.candidates ?? [];
+        if (candidates.length === 0) {
+          return NextResponse.json({ error: "No se encontró el libro", raw: result.raw }, { status: 404 });
+        }
+        if (candidates.length === 1) {
+          // Un único resultado no merece preguntar — se baja directo.
+          result = await sendFollowUp(candidates[0].command, q);
+        } else {
+          // Varios resultados: el cliente elige, no adivinamos aquí.
+          return NextResponse.json({ status: "candidates", candidates, raw: result.raw });
+        }
       }
-      // Cogemos el candidato cuyo título coincida mejor con la búsqueda; si no,
-      // el primero de la lista. Para elegir a mano, se puede exponer luego un
-      // ?candidates=1 que devuelva la lista sin encadenar el follow-up.
-      const normalized = q.toLowerCase();
-      const best =
-        candidates.find((c) => c.label.toLowerCase().includes(normalized)) ?? candidates[0];
-      result = await sendFollowUp(best.command, q);
     }
 
     if (result.status === "document" && result.filePath) {
