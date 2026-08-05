@@ -88,6 +88,12 @@ plugins solo se cargan al arrancar KOReader.
 - **Recomendados para mí**: muestra la lista de recomendaciones actuales
   del servidor (puede salir vacía si todavía no le has dado "Me gusta" a
   ningún libro).
+- **Buscar en mi Telegram**: escribe un título y descarga directamente el
+  epub desde tu bot personal de Telegram (`GET /api/books/search?q=`, ver
+  Parte A). No hay lista de resultados intermedia — el servidor ya elige el
+  mejor candidato y encadena la descarga; puede tardar 15-40s porque de
+  fondo está hablando con el bot en vivo (búsqueda + clic en el botón Epub +
+  espera del documento).
 - Los epubs descargados se guardan en la carpeta "Home" configurada en
   KOReader (la misma que usa el gestor de archivos) y la vista de archivos
   se refresca automáticamente al terminar la descarga.
@@ -100,6 +106,6 @@ plugins solo se cargan al arrancar KOReader.
 - **"El servidor devolvió una respuesta no válida"**: normalmente indica
   que la URL configurada no apunta a la API (por ejemplo apunta a una
   página HTML en vez de al servidor Next.js), o que el servidor está caído.
-- El plugin no puede probarse aún en el propio dispositivo mientras no
-  tengas SSH activado ni KOReader instalado; hasta entonces solo se puede
-  revisar el código Lua.
+- **"Buscar en mi Telegram" tarda o da timeout**: el servidor depende de que
+  su sesión de Telegram (`TG_SESSION`) siga viva y de la latencia real del
+  bot — si fue timeout del lado del bot, reintenta la búsqueda.
