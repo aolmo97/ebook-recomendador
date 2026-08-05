@@ -93,7 +93,9 @@ plugins solo se cargan al arrancar KOReader.
   Parte A). No hay lista de resultados intermedia — el servidor ya elige el
   mejor candidato y encadena la descarga; puede tardar 15-40s porque de
   fondo está hablando con el bot en vivo (búsqueda + clic en el botón Epub +
-  espera del documento).
+  espera del documento). Mientras tanto se ve un aviso de carga persistente
+  (no es una barra con % real — no se conoce el tamaño del epub hasta que
+  termina la descarga). Al acabar, ofrece abrir el libro al momento.
 - Los epubs descargados se guardan en la carpeta "Home" configurada en
   KOReader (la misma que usa el gestor de archivos) y la vista de archivos
   se refresca automáticamente al terminar la descarga.

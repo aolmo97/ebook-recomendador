@@ -1,3 +1,4 @@
+local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local FileManager = require("apps/filemanager/filemanager")
 local InfoMessage = require("ui/widget/infomessage")
@@ -6,7 +7,9 @@ local JSON = require("json")
 local LuaSettings = require("luasettings")
 local Menu = require("ui/widget/menu")
 local NetworkMgr = require("ui/network/manager")
+local ReaderUI = require("apps/reader/readerui")
 local TextViewer = require("ui/widget/textviewer")
+local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
@@ -209,60 +212,73 @@ function EbookRecomendador:promptTelegramSearch()
     dialog:onShowKeyboard()
 end
 
--- El endpoint /api/books/search puede tardar (busca en el bot de Telegram y
--- pulsa el botón Epub en vivo), y devuelve o el epub binario (200) o un JSON
--- de error (404/502/504) — se escribe siempre a un archivo temporal primero
--- porque LuaSocket solo da el código/cabeceras cuando la petición ya terminó.
+-- El endpoint /api/books/search puede tardar 15-40s (busca en el bot de
+-- Telegram y pulsa el botón Epub en vivo), y devuelve o el epub binario
+-- (200) o un JSON de error (404/502/504) — se escribe siempre a un archivo
+-- temporal primero porque LuaSocket solo da el código/cabeceras cuando la
+-- petición ya terminó. Trapper:wrap + Trapper:info dan un aviso de "cargando"
+-- persistente durante esa espera (no hay progreso real en % porque no
+-- conocemos el tamaño del epub hasta que la descarga ha terminado).
 function EbookRecomendador:downloadFromTelegram(query)
     NetworkMgr:runWhenOnline(function()
-        UIManager:show(InfoMessage:new{
-            text = _("Buscando en Telegram… puede tardar unos segundos."),
-            timeout = 3,
-        })
-        local url = self:getServerUrl() .. "/api/books/search?q=" .. self:urlEncode(query)
-        local dir = filemanagerutil.getHomeFolder()
-        local tmp_filepath = ffiUtil.joinPath(dir, self:sanitizeFilename(query) .. ".epub.part")
-        local file = io.open(tmp_filepath, "wb")
-        if not file then
-            UIManager:show(InfoMessage:new{ text = _("No se pudo crear el archivo en la biblioteca.") })
-            return
-        end
+        Trapper:wrap(function()
+            Trapper:info(_("Buscando en tu Telegram… puede tardar hasta 40s."))
 
-        socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
-        local code, headers = socket.skip(1, http.request{
-            url = url,
-            sink = ltn12.sink.file(file),
-        })
-        socketutil:reset_timeout()
-
-        if code ~= 200 then
-            local err_file = io.open(tmp_filepath, "r")
-            local content = err_file and err_file:read("*a") or ""
-            if err_file then err_file:close() end
-            os.remove(tmp_filepath)
-            local decode_ok, decoded = pcall(JSON.decode, content)
-            local msg = (decode_ok and type(decoded) == "table" and decoded.error)
-                or T(_("Error buscando en Telegram (%1)."), tostring(code))
-            UIManager:show(InfoMessage:new{ text = msg })
-            return
-        end
-
-        local final_filename = self:sanitizeFilename(query) .. ".epub"
-        local disposition = headers and (headers["content-disposition"] or headers["Content-Disposition"])
-        if disposition then
-            local raw_name = disposition:match('filename="([^"]+)"')
-            if raw_name then
-                final_filename = self:sanitizeFilename(self:urlDecode(raw_name))
+            local url = self:getServerUrl() .. "/api/books/search?q=" .. self:urlEncode(query)
+            local dir = filemanagerutil.getHomeFolder()
+            local tmp_filepath = ffiUtil.joinPath(dir, self:sanitizeFilename(query) .. ".epub.part")
+            local file = io.open(tmp_filepath, "wb")
+            if not file then
+                Trapper:clear()
+                UIManager:show(InfoMessage:new{ text = _("No se pudo crear el archivo en la biblioteca.") })
+                return
             end
-        end
-        local final_filepath = ffiUtil.joinPath(dir, final_filename)
-        os.remove(final_filepath)
-        os.rename(tmp_filepath, final_filepath)
 
-        UIManager:show(InfoMessage:new{ text = T(_("Descargado: %1"), final_filename) })
-        if FileManager.instance then
-            FileManager.instance:onRefresh()
-        end
+            socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
+            local code, headers = socket.skip(1, http.request{
+                url = url,
+                sink = ltn12.sink.file(file),
+            })
+            socketutil:reset_timeout()
+            Trapper:clear()
+
+            if code ~= 200 then
+                local err_file = io.open(tmp_filepath, "r")
+                local content = err_file and err_file:read("*a") or ""
+                if err_file then err_file:close() end
+                os.remove(tmp_filepath)
+                local decode_ok, decoded = pcall(JSON.decode, content)
+                local msg = (decode_ok and type(decoded) == "table" and decoded.error)
+                    or T(_("Error buscando en Telegram (%1)."), tostring(code))
+                UIManager:show(InfoMessage:new{ text = msg })
+                return
+            end
+
+            local final_filename = self:sanitizeFilename(query) .. ".epub"
+            local disposition = headers and (headers["content-disposition"] or headers["Content-Disposition"])
+            if disposition then
+                local raw_name = disposition:match('filename="([^"]+)"')
+                if raw_name then
+                    final_filename = self:sanitizeFilename(self:urlDecode(raw_name))
+                end
+            end
+            local final_filepath = ffiUtil.joinPath(dir, final_filename)
+            os.remove(final_filepath)
+            os.rename(tmp_filepath, final_filepath)
+
+            if FileManager.instance then
+                FileManager.instance:onRefresh()
+            end
+
+            UIManager:show(ConfirmBox:new{
+                text = T(_("Descargado: %1\n\n¿Abrir ahora?"), final_filename),
+                ok_text = _("Abrir"),
+                cancel_text = _("Ahora no"),
+                ok_callback = function()
+                    ReaderUI:showReader(final_filepath)
+                end,
+            })
+        end)
     end)
 end
 
