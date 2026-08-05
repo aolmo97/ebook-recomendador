@@ -227,6 +227,11 @@ async function interpretBotMessage(
 export async function searchBook(bookName: string): Promise<BookSearchResult> {
   return withReconnect(async (tg) => {
     const waitPromise = waitForBotMessage(tg);
+    // Si sendMessage falla antes de que alguien espere waitPromise, su propio
+    // rechazo (timeout interno) queda huérfano y explota como unhandledRejection
+    // más tarde. Este catch mudo solo evita ese ruido; el resultado real se
+    // sigue leyendo del await de abajo.
+    waitPromise.catch(() => {});
     await tg.sendMessage(BOT_HANDLE, { message: bookName });
     try {
       const message = await waitPromise;
@@ -244,6 +249,7 @@ export async function searchBook(bookName: string): Promise<BookSearchResult> {
 export async function sendFollowUp(command: string, fallbackName = "libro"): Promise<BookSearchResult> {
   return withReconnect(async (tg) => {
     const waitPromise = waitForBotMessage(tg);
+    waitPromise.catch(() => {});
     await tg.sendMessage(BOT_HANDLE, { message: command });
     try {
       const message = await waitPromise;
