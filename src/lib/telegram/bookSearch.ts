@@ -27,6 +27,11 @@ const RESPONSE_TIMEOUT_MS = 15_000;
 const DEBUG = process.env.TG_DEBUG === "1";
 
 let client: TelegramClient | null = null;
+// Si dos peticiones llegan casi a la vez y "client" todavía es null, sin este
+// lock cada una crearía su propio TelegramClient y conectaría con la MISMA
+// sesión en paralelo — eso es exactamente lo que Telegram ve como
+// AUTH_KEY_DUPLICATED. Con el lock, la segunda espera la conexión de la primera.
+let connecting: Promise<TelegramClient> | null = null;
 
 function assertEnv() {
   if (!API_ID || !API_HASH || !SESSION) {
@@ -38,15 +43,23 @@ function assertEnv() {
 
 async function getClient(): Promise<TelegramClient> {
   assertEnv();
-  if (client) {
-    if (!client.connected) await client.connect();
-    return client;
+  if (client?.connected) return client;
+
+  if (!connecting) {
+    connecting = (async () => {
+      if (!client) {
+        client = new TelegramClient(new StringSession(SESSION), API_ID, API_HASH, {
+          connectionRetries: 5,
+        });
+      }
+      await client.connect();
+      return client;
+    })().finally(() => {
+      connecting = null;
+    });
   }
-  client = new TelegramClient(new StringSession(SESSION), API_ID, API_HASH, {
-    connectionRetries: 5,
-  });
-  await client.connect();
-  return client;
+
+  return connecting;
 }
 
 // Si la operación falla (conexión caída, o el cliente queda en un estado roto
