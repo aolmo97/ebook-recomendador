@@ -14,21 +14,36 @@ no tiene auth en ningún endpoint todavía).
 `src/lib/manga/types.ts` define `MangaSource` (`search`, `getSeries`,
 `getChapterImages`). Fuente activa: `src/lib/manga/source.ts`.
 
-- `sources/mangadex.ts` — adaptador **fake/de prueba** contra la API pública
-  de MangaDex. Funciona de verdad (probado end-to-end), permite validar todo
-  el flujo mientras se confirma la fuente real.
-- `sources/scrapingExample.ts` — plantilla para la fuente real por scraping
-  HTML (cheerio). No apunta a ningún sitio: tiene `BASE_URL` y selectores
-  marcados `TODO`.
+- `sources/inmanga.ts` — adaptador **real**, scraping de inmanga.com. Endpoints
+  descubiertos inspeccionando los bundles JS del sitio (no hay API pública):
+  - Buscar: `POST /manga/getMangasConsultResult` → fragmento HTML de tarjetas.
+  - Detalle: `GET /ver/manga/{slug-cualquiera}/{seriesId}` → HTML server-rendered
+    (el slug se ignora en el servidor, solo importa el GUID).
+  - Capítulos: `GET /chapter/getall?mangaIdentification={seriesId}` → JSON
+    doble-encodeado (`{"data": "<json string>"}`).
+  - Páginas: `GET /chapter/chapterIndexControls?identification={chapterId}` →
+    fragmento HTML con un `<img id="{pageId}" data-pagenumber="N">` por página.
+  - Imagen: `https://cdn1.intomanga.com/i/m/{seriesId}/c/{chapterId}/o/{pageId}.jpg`.
+  - IDs inexistentes → HTTP 404 en las rutas HTML, `{success:false}` en las JSON.
+    `robots.txt` no restringe ninguna ruta usada aquí.
+- `sources/mangadex.ts` — adaptador de referencia contra la API pública de
+  MangaDex (sin scraping). Queda como fallback/ejemplo si inmanga cambia de
+  HTML y hay que reemplazar temporalmente la fuente activa.
 
-### Cómo conectar la fuente real
+### Cambiar de fuente
 
-1. Rellenar `BASE_URL` y selectores en `sources/scrapingExample.ts` (o crear
-   otro archivo si la fuente real tiene API JSON en vez de HTML — copiar el
-   patrón de `mangadex.ts` en ese caso).
-2. En `source.ts`, cambiar `export const mangaSource: MangaSource = new MangaDexSource()`
-   por la nueva implementación.
-3. Nada más cambia: rutas, caché Prisma y descarga/CBZ son agnósticas a la fuente.
+En `source.ts`, cambiar `export const mangaSource: MangaSource = new InMangaSource()`
+por otra implementación de `MangaSource`. Nada más cambia: rutas, caché Prisma
+y descarga/CBZ son agnósticas a la fuente.
+
+### Riesgos de inmanga.ts (scraping real)
+
+- Selectores CSS y endpoints frágiles: si el sitio cambia el HTML/JS, esto se
+  rompe silenciosamente (empieza a devolver listas vacías, no errores).
+- El sitio usa Cloudflare (challenge script visible en el HTML) pero no lo vimos
+  bloquear estas rutas en pruebas puntuales; bajo carga sostenida podría empezar
+  a desafiar/bloquear al `User-Agent` usado — si pasa, bajar la concurrencia en
+  `download.ts` y espaciar más los reintentos.
 
 ## Caché (Prisma)
 

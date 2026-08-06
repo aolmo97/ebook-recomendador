@@ -1,6 +1,6 @@
-import { MangaDexSource } from "./sources/mangadex";
+import { InMangaSource } from "./sources/inmanga";
 import type { MangaSource } from "./types";
 
-// Fuente activa. Cuando se confirme la web fuente real, sustituir por su
-// adaptador (p.ej. basado en src/lib/manga/sources/scrapingExample.ts).
-export const mangaSource: MangaSource = new MangaDexSource();
+// Fuente activa: inmanga.com (scraping real, ver sources/inmanga.ts).
+// sources/mangadex.ts queda como fallback/referencia (API pública, sin scraping).
+export const mangaSource: MangaSource = new InMangaSource();
