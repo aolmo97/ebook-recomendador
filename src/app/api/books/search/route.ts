@@ -36,27 +36,23 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    let result: BookSearchResult;
+    let result: BookSearchResult = command ? await sendFollowUp(command, q) : await searchBook(q);
 
-    if (command) {
-      // El cliente ya eligió un candidato de una búsqueda anterior.
-      result = await sendFollowUp(command, q);
-    } else {
-      result = await searchBook(q);
-
-      if (result.status === "candidates") {
-        const candidates = result.candidates ?? [];
-        if (candidates.length === 0) {
-          return NextResponse.json({ error: "No se encontró el libro", raw: result.raw }, { status: 404 });
-        }
-        if (candidates.length === 1) {
-          // Un único resultado no merece preguntar — se baja directo.
-          result = await sendFollowUp(candidates[0].command, q);
-        } else {
-          // Varios resultados: el cliente elige, no adivinamos aquí.
-          return NextResponse.json({ status: "candidates", candidates, raw: result.raw });
-        }
+    // Un candidato puede ser un libro suelto o una "colección" que al
+    // elegirla expande en OTRA lista de candidatos (los libros de dentro) —
+    // se repite el mismo criterio (auto-bajar si solo hay 1, si no preguntar)
+    // en cualquier nivel de anidamiento, con un tope para no dar vueltas si
+    // el bot devolviera candidatos en bucle.
+    for (let depth = 0; depth < 5 && result.status === "candidates"; depth++) {
+      const candidates = result.candidates ?? [];
+      if (candidates.length === 0) {
+        return NextResponse.json({ error: "No se encontró el libro", raw: result.raw }, { status: 404 });
       }
+      if (candidates.length > 1) {
+        return NextResponse.json({ status: "candidates", candidates, raw: result.raw });
+      }
+      // Un único resultado (o colección de un solo libro) no merece preguntar.
+      result = await sendFollowUp(candidates[0].command, q);
     }
 
     if (result.status === "document" && result.filePath) {
