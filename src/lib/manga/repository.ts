@@ -1,14 +1,21 @@
 import { prisma } from "@/lib/prisma";
-import { mangaSource } from "./source";
+import { parseMangaId } from "./id";
+import { getMangaSource } from "./source";
 import type { MangaSeriesDetail } from "./types";
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h: suficiente para evitar rescrapeos en ráfaga sin servir capítulos muy desactualizados
 
 /**
- * Detalle de serie con caché de metadata en Prisma (no imágenes). La
- * búsqueda (search) no se cachea: varía por query y es barata de repetir.
+ * Detalle de serie con caché de metadata en Prisma (no imágenes). `id` es el
+ * id compuesto "fuente:idDeLaFuente" (ver id.ts) — se usa tal cual como
+ * clave primaria en Prisma, así que series de distintas fuentes nunca
+ * chocan. La búsqueda (search) no se cachea: varía por query y es barata de
+ * repetir.
  */
 export async function getSeriesCached(id: string): Promise<MangaSeriesDetail | null> {
+  const parsed = parseMangaId(id);
+  if (!parsed) return null;
+
   const cached = await prisma.mangaSeries.findUnique({
     where: { id },
     include: { chapters: { orderBy: { updatedAt: "asc" } } },
@@ -30,13 +37,13 @@ export async function getSeriesCached(id: string): Promise<MangaSeriesDetail | n
     };
   }
 
-  const fresh = await mangaSource.getSeries(id);
+  const fresh = await getMangaSource(parsed.source).getSeries(parsed.sourceId);
   if (!fresh) return null;
 
   await prisma.mangaSeries.upsert({
-    where: { id: fresh.id },
+    where: { id },
     create: {
-      id: fresh.id,
+      id,
       title: fresh.title,
       synopsis: fresh.synopsis,
       coverUrl: fresh.coverUrl,
@@ -52,9 +59,9 @@ export async function getSeriesCached(id: string): Promise<MangaSeriesDetail | n
 
   for (const chapter of fresh.chapters) {
     await prisma.mangaChapter.upsert({
-      where: { seriesId_chapterId: { seriesId: fresh.id, chapterId: chapter.chapterId } },
+      where: { seriesId_chapterId: { seriesId: id, chapterId: chapter.chapterId } },
       create: {
-        seriesId: fresh.id,
+        seriesId: id,
         chapterId: chapter.chapterId,
         number: chapter.number,
         title: chapter.title,
@@ -68,5 +75,5 @@ export async function getSeriesCached(id: string): Promise<MangaSeriesDetail | n
     });
   }
 
-  return fresh;
+  return { ...fresh, id };
 }

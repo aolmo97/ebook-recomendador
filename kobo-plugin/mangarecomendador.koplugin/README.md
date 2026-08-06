@@ -44,8 +44,9 @@ arrancar.
 
 ## 4. Uso
 
-- **Buscar manga**: escribe un título y pulsa "Buscar". Toca cualquier
-  resultado para ver el detalle (número de capítulos + sinopsis).
+- **Buscar manga**: primero elige la fuente (**InManga** o **ManhwaWeb**),
+  luego escribe un título y pulsa "Buscar". Toca cualquier resultado para ver
+  el detalle (número de capítulos + sinopsis).
 - Desde el detalle, **"Ver capítulos"** abre la lista completa de la serie
   (en el mismo orden que devuelve el servidor).
 - Toca un capítulo para descargarlo. El servidor descarga todas las páginas

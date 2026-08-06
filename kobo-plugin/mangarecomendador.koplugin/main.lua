@@ -24,6 +24,12 @@ local _ = require("gettext")
 
 local DEFAULT_SERVER_URL = "http://127.0.0.1:3000"
 
+-- Mismas claves que MANGA_SOURCE_KEYS en src/lib/manga/id.ts.
+local MANGA_SOURCES = {
+    { key = "inmanga", label = _("InManga") },
+    { key = "manhwaweb", label = _("ManhwaWeb") },
+}
+
 local MangaRecomendador = WidgetContainer:extend{
     name = "mangarecomendador",
     is_doc_only = false,
@@ -131,7 +137,27 @@ function MangaRecomendador:promptServerUrl()
     dialog:onShowKeyboard()
 end
 
+-- Primero se elige la fuente (InManga / ManhwaWeb) y solo después se pide el
+-- texto a buscar, porque el endpoint /api/manga/search exige el parámetro
+-- "source" (ver src/app/api/manga/search/route.ts).
 function MangaRecomendador:promptSearch()
+    local item_table = {}
+    for _idx, source in ipairs(MANGA_SOURCES) do
+        table.insert(item_table, { text = source.label, source_key = source.key })
+    end
+    local source_menu
+    source_menu = Menu:new{
+        title = _("Elige fuente"),
+        item_table = item_table,
+        onMenuSelect = function(_menu, entry)
+            UIManager:close(source_menu)
+            self:promptSearchQuery(entry.source_key)
+        end,
+    }
+    UIManager:show(source_menu)
+end
+
+function MangaRecomendador:promptSearchQuery(source_key)
     local dialog
     dialog = InputDialog:new{
         title = _("Buscar manga"),
@@ -151,7 +177,7 @@ function MangaRecomendador:promptSearch()
                         local query = dialog:getInputText()
                         UIManager:close(dialog)
                         if query and query ~= "" then
-                            self:runSearch(query)
+                            self:runSearch(query, source_key)
                         end
                     end,
                 },
@@ -162,9 +188,10 @@ function MangaRecomendador:promptSearch()
     dialog:onShowKeyboard()
 end
 
-function MangaRecomendador:runSearch(query)
+function MangaRecomendador:runSearch(query, source_key)
     NetworkMgr:runWhenOnline(function()
-        local ok, result = self:apiRequest("GET", "/api/manga/search?q=" .. self:urlEncode(query))
+        local path = "/api/manga/search?q=" .. self:urlEncode(query) .. "&source=" .. self:urlEncode(source_key)
+        local ok, result = self:apiRequest("GET", path)
         if not ok then
             UIManager:show(InfoMessage:new{ text = result })
             return
@@ -209,7 +236,7 @@ function MangaRecomendador:showSeriesViewer(series)
     local text = table.concat({
         T(_("Capítulos disponibles: %1"), tostring(chapter_count)),
         "",
-        series.synopsis or _("Sin sinopsis disponible."),
+        type(series.synopsis) == "string" and series.synopsis ~= "" and series.synopsis or _("Sin sinopsis disponible."),
     }, "\n")
     local viewer
     viewer = TextViewer:new{
@@ -244,8 +271,9 @@ function MangaRecomendador:showChaptersMenu(series)
     end
     local item_table = {}
     for _idx, chapter in ipairs(chapters) do
-        local label = T(_("Capítulo %1"), chapter.number or "?")
-        if chapter.title and chapter.title ~= "" then
+        local number = type(chapter.number) == "string" and chapter.number or "?"
+        local label = T(_("Capítulo %1"), number)
+        if type(chapter.title) == "string" and chapter.title ~= "" then
             label = label .. " - " .. chapter.title
         end
         table.insert(item_table, { text = label, chapter = chapter })
@@ -269,9 +297,10 @@ end
 -- escribe siempre a un archivo temporal primero, porque LuaSocket solo da el
 -- código/cabeceras cuando la petición ha terminado del todo.
 function MangaRecomendador:downloadChapter(series, chapter)
+    local number = type(chapter.number) == "string" and chapter.number or "?"
     NetworkMgr:runWhenOnline(function()
         Trapper:wrap(function()
-            Trapper:info(T(_("Descargando capítulo %1… puede tardar un rato."), chapter.number or "?"))
+            Trapper:info(T(_("Descargando capítulo %1… puede tardar un rato."), number))
 
             local url = self:getServerUrl()
                 .. "/api/manga/" .. self:urlEncode(series.id)
@@ -279,7 +308,7 @@ function MangaRecomendador:downloadChapter(series, chapter)
                 .. "/download"
 
             local dir = filemanagerutil.getHomeFolder()
-            local base_name = self:sanitizeFilename(series.title) .. " - Cap " .. self:sanitizeFilename(chapter.number or "?")
+            local base_name = self:sanitizeFilename(series.title) .. " - Cap " .. self:sanitizeFilename(number)
             local tmp_filepath = ffiUtil.joinPath(dir, base_name .. ".cbz.part")
             local file = io.open(tmp_filepath, "wb")
             if not file then

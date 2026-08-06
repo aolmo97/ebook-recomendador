@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildCbz } from "@/lib/manga/cbz";
 import { downloadChapterImages } from "@/lib/manga/download";
-import { mangaSource } from "@/lib/manga/source";
+import { parseMangaId } from "@/lib/manga/id";
+import { getMangaSource } from "@/lib/manga/source";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; chapterId: string }> },
 ) {
   const { id, chapterId } = await params;
-  const seriesId = decodeURIComponent(id);
   const decodedChapterId = decodeURIComponent(chapterId);
 
+  const parsed = parseMangaId(decodeURIComponent(id));
+  if (!parsed) {
+    return NextResponse.json({ error: "Serie no encontrada" }, { status: 404 });
+  }
+
   try {
-    const images = await mangaSource.getChapterImages(seriesId, decodedChapterId);
+    const images = await getMangaSource(parsed.source).getChapterImages(parsed.sourceId, decodedChapterId);
     if (images.length === 0) {
       return NextResponse.json({ error: "Capítulo no encontrado o sin páginas" }, { status: 404 });
     }
