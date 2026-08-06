@@ -179,9 +179,11 @@ async function waitForNextDocument(tg: TelegramClient, fallbackName: string): Pr
   }
 }
 
-// Interpreta cualquier respuesta del bot: documento directo, ficha con botones
-// (pulsa "Epub" y espera el documento que llega después), lista de candidatos
-// en texto, o "sin resultados".
+// Interpreta cualquier respuesta del bot: documento directo, lista de
+// candidatos en texto (que puede venir junto con botones de paginación ⏮⬅️➡️⏭
+// para ver más resultados — esos NO son botones de descarga, así que el texto
+// se comprueba antes que los botones), ficha con botones de un libro concreto
+// (pulsa "Epub" y espera el documento), o "sin resultados".
 async function interpretBotMessage(
   tg: TelegramClient,
   message: Api.Message,
@@ -193,20 +195,9 @@ async function interpretBotMessage(
     return downloadDocument(tg, message, fallbackName);
   }
 
-  const markup = message.replyMarkup as Api.ReplyInlineMarkup | undefined;
-  if (markup?.rows?.length) {
-    try {
-      await clickEpubButton(message);
-    } catch (err) {
-      return { status: "error", raw: message.message ?? "", error: (err as Error).message };
-    }
-    return waitForNextDocument(tg, fallbackName);
-  }
-
   const text = message.message ?? "";
 
-  // TODO: confirmar contra respuesta real de @aolmislibros. Formato asumido:
-  // una línea por candidato, "Título del libro /comando".
+  // Una línea por candidato: "Título del libro /comando".
   const candidateLines = text
     .split("\n")
     .map((line) => line.match(/^(.*?)\s+(\/\S+)$/))
@@ -218,6 +209,16 @@ async function interpretBotMessage(
       raw: text,
       candidates: candidateLines.map((m) => ({ label: m[1].trim(), command: m[2].trim() })),
     };
+  }
+
+  const markup = message.replyMarkup as Api.ReplyInlineMarkup | undefined;
+  if (markup?.rows?.length) {
+    try {
+      await clickEpubButton(message);
+    } catch (err) {
+      return { status: "error", raw: text, error: (err as Error).message };
+    }
+    return waitForNextDocument(tg, fallbackName);
   }
 
   return { status: "no_results", raw: text };
