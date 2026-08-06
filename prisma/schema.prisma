@@ -56,3 +56,30 @@ model Like {
 
   @@unique([userId, bookId])
 }
+
+// Cache de metadata (no imágenes) de series/capítulos de manga, para no
+// rescrapear la fuente en cada consulta de detalle. Ver src/lib/manga/README.md.
+model MangaSeries {
+  id         String   @id // id estable del adaptador (slug/uuid de la fuente)
+  title      String
+  synopsis   String?
+  coverUrl   String?
+  sourceUrl  String
+  updatedAt  DateTime @updatedAt
+
+  chapters MangaChapter[]
+}
+
+model MangaChapter {
+  id          String    @id @default(cuid())
+  seriesId    String
+  chapterId   String // id estable del capítulo en la fuente
+  number      String
+  title       String?
+  publishedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  series MangaSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, chapterId])
+}
