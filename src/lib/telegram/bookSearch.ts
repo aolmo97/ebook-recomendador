@@ -12,6 +12,7 @@
  */
 
 import { Api, TelegramClient } from "telegram";
+import { EditedMessage } from "telegram/events/EditedMessage";
 import { NewMessage, NewMessageEvent } from "telegram/events";
 import { StringSession } from "telegram/sessions";
 import * as fs from "fs";
@@ -268,28 +269,49 @@ export async function sendFollowUp(command: string, fallbackName = "libro"): Pro
  */
 export async function requestPersonalBot(publicBotUsername: string): Promise<string> {
   return withReconnect(async (tg) => {
-    const waitPromise = waitForBotMessage(tg, undefined, publicBotUsername);
-    waitPromise.catch(() => {});
-    await tg.sendMessage(`@${publicBotUsername}`, { message: "/mybot" });
+    // El bot puede contestar con varios mensajes (aviso de sobrecarga y luego
+    // el bot personal, o el mensaje editado), así que se escuchan todos
+    // durante una ventana y se busca el @bot en cada uno.
+    const eventBuilder = new NewMessage({});
+    const edited = new EditedMessage({});
+    const seen: string[] = [];
+    let resolveFound: (u: string) => void = () => {};
+    const foundPromise = new Promise<string>((resolve) => {
+      resolveFound = resolve;
+    });
 
-    let message: Api.Message;
+    const handler = async (event: { message: Api.Message }) => {
+      const message = event.message;
+      if (!(await isFromBot(message, publicBotUsername))) return;
+      debugLog("respuesta /mybot", message);
+      const urls = ((message.replyMarkup as Api.ReplyInlineMarkup | undefined)?.rows ?? [])
+        .flatMap((r) => r.buttons ?? [])
+        .map((b) => (b as { url?: string }).url ?? "");
+      const haystack = [message.message ?? "", ...urls].join("\n");
+      seen.push((message.message ?? "").slice(0, 200));
+      const found = [...haystack.matchAll(/(?:@|t\.me\/)([A-Za-z0-9_]{4,}bot)(?![A-Za-z0-9_])/gi)]
+        .map((m) => m[1])
+        .find((u) => u.toLowerCase() !== publicBotUsername.toLowerCase());
+      if (found) resolveFound(found);
+    };
+
+    tg.addEventHandler(handler, eventBuilder);
+    tg.addEventHandler(handler, edited);
     try {
-      message = await waitPromise;
-    } catch {
-      throw new Error("El bot público no respondió a /mybot");
+      await tg.sendMessage(`@${publicBotUsername}`, { message: "/mybot" });
+      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 9_000));
+      const found = await Promise.race([foundPromise, timeout]);
+      if (!found) {
+        throw new Error(
+          seen.length
+            ? `/mybot no devolvió ningún bot: ${seen.join(" | ")}`
+            : "El bot público no respondió a /mybot"
+        );
+      }
+      return found;
+    } finally {
+      tg.removeEventHandler(handler, eventBuilder);
+      tg.removeEventHandler(handler, edited);
     }
-    debugLog("respuesta /mybot", message);
-
-    const urls = ((message.replyMarkup as Api.ReplyInlineMarkup | undefined)?.rows ?? [])
-      .flatMap((r) => r.buttons ?? [])
-      .map((b) => (b as { url?: string }).url ?? "");
-    const haystack = [message.message ?? "", ...urls].join("\n");
-    const found = [...haystack.matchAll(/(?:@|t\.me\/)([A-Za-z0-9_]{4,}bot)(?![A-Za-z0-9_])/gi)]
-      .map((m) => m[1])
-      .find((u) => u.toLowerCase() !== publicBotUsername.toLowerCase());
-    if (!found) {
-      throw new Error(`/mybot no devolvió ningún bot: ${(message.message ?? "").slice(0, 200)}`);
-    }
-    return found;
   });
 }
