@@ -17,12 +17,11 @@ import { StringSession } from "telegram/sessions";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { getBotHandle, getBotUsername } from "./botHandle";
 
 const API_ID = Number(process.env.TG_API_ID);
 const API_HASH = process.env.TG_API_HASH ?? "";
 const SESSION = process.env.TG_SESSION ?? "";
-const BOT_HANDLE = "@BibliotecaSecretaMEGABot";
-const BOT_USERNAME = "BibliotecaSecretaMEGABot";
 const RESPONSE_TIMEOUT_MS = 15_000;
 const DEBUG = process.env.TG_DEBUG === "1";
 
@@ -107,7 +106,7 @@ export interface BookSearchResult {
 
 async function isFromBot(message: Api.Message): Promise<boolean> {
   const sender = (await message.getSender()) as Api.User | undefined;
-  return Boolean(sender?.username?.toLowerCase() === BOT_USERNAME.toLowerCase());
+  return Boolean(sender?.username?.toLowerCase() === (await getBotUsername()).toLowerCase());
 }
 
 async function waitForBotMessage(
@@ -233,7 +232,7 @@ export async function searchBook(bookName: string): Promise<BookSearchResult> {
     // más tarde. Este catch mudo solo evita ese ruido; el resultado real se
     // sigue leyendo del await de abajo.
     waitPromise.catch(() => {});
-    await tg.sendMessage(BOT_HANDLE, { message: bookName });
+    await tg.sendMessage(await getBotHandle(), { message: bookName });
     try {
       const message = await waitPromise;
       return interpretBotMessage(tg, message, bookName);
@@ -251,7 +250,7 @@ export async function sendFollowUp(command: string, fallbackName = "libro"): Pro
   return withReconnect(async (tg) => {
     const waitPromise = waitForBotMessage(tg);
     waitPromise.catch(() => {});
-    await tg.sendMessage(BOT_HANDLE, { message: command });
+    await tg.sendMessage(await getBotHandle(), { message: command });
     try {
       const message = await waitPromise;
       return interpretBotMessage(tg, message, fallbackName);

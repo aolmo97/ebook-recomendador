@@ -59,6 +59,11 @@ function EbookRecomendador:addToMainMenu(menu_items)
                 callback = function() self:promptTelegramSearch() end,
             },
             {
+                text = _("Actualizar bot de Telegram"),
+                keep_menu_open = true,
+                callback = function() self:updateTelegramBot() end,
+            },
+            {
                 text = _("Configurar servidor"),
                 keep_menu_open = true,
                 callback = function() self:promptServerUrl() end,
@@ -315,6 +320,29 @@ function EbookRecomendador:showTelegramCandidates(query, candidates)
         end,
     }
     UIManager:show(candidates_menu)
+end
+
+-- El servidor lee http://bibliotecasecreta.nl, extrae el bot de Telegram
+-- vigente y lo guarda para las próximas búsquedas.
+function EbookRecomendador:updateTelegramBot()
+    NetworkMgr:runWhenOnline(function()
+        local ok, result = self:apiRequest("POST", "/api/books/bot/update")
+        if not ok then
+            UIManager:show(InfoMessage:new{ text = result })
+            return
+        end
+        if result.error then
+            UIManager:show(InfoMessage:new{ text = result.error })
+        elseif result.changed then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Bot actualizado: %1 (antes %2)"), result.username, result.previous),
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("El bot ya estaba al día: %1"), result.username),
+            })
+        end
+    end)
 end
 
 function EbookRecomendador:runSearch(query)

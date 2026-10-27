@@ -83,3 +83,9 @@ model MangaChapter {
 
   @@unique([seriesId, chapterId])
 }
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
