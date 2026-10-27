@@ -104,14 +104,15 @@ export interface BookSearchResult {
   error?: string;
 }
 
-async function isFromBot(message: Api.Message): Promise<boolean> {
+async function isFromBot(message: Api.Message, username?: string): Promise<boolean> {
   const sender = (await message.getSender()) as Api.User | undefined;
-  return Boolean(sender?.username?.toLowerCase() === (await getBotUsername()).toLowerCase());
+  return Boolean(sender?.username?.toLowerCase() === (username ?? (await getBotUsername())).toLowerCase());
 }
 
 async function waitForBotMessage(
   tg: TelegramClient,
-  filter?: (m: Api.Message) => boolean
+  filter?: (m: Api.Message) => boolean,
+  botUsername?: string
 ): Promise<Api.Message> {
   return new Promise((resolve, reject) => {
     const eventBuilder = new NewMessage({});
@@ -122,7 +123,7 @@ async function waitForBotMessage(
 
     const handler = async (event: NewMessageEvent) => {
       const message = event.message;
-      if (!(await isFromBot(message))) return;
+      if (!(await isFromBot(message, botUsername))) return;
       if (filter && !filter(message)) return;
       clearTimeout(timeout);
       tg.removeEventHandler(handler, eventBuilder);
@@ -257,5 +258,38 @@ export async function sendFollowUp(command: string, fallbackName = "libro"): Pro
     } catch {
       return { status: "timeout" };
     }
+  });
+}
+
+/**
+ * El bot público de la web suele estar sobrecargado y manda a usar /mybot, que
+ * devuelve un bot secreto personal. Se le escribe /mybot y se saca el primer
+ * @bot (en texto, enlaces o botones) distinto del público.
+ */
+export async function requestPersonalBot(publicBotUsername: string): Promise<string> {
+  return withReconnect(async (tg) => {
+    const waitPromise = waitForBotMessage(tg, undefined, publicBotUsername);
+    waitPromise.catch(() => {});
+    await tg.sendMessage(`@${publicBotUsername}`, { message: "/mybot" });
+
+    let message: Api.Message;
+    try {
+      message = await waitPromise;
+    } catch {
+      throw new Error("El bot público no respondió a /mybot");
+    }
+    debugLog("respuesta /mybot", message);
+
+    const urls = ((message.replyMarkup as Api.ReplyInlineMarkup | undefined)?.rows ?? [])
+      .flatMap((r) => r.buttons ?? [])
+      .map((b) => (b as { url?: string }).url ?? "");
+    const haystack = [message.message ?? "", ...urls].join("\n");
+    const found = [...haystack.matchAll(/(?:@|t\.me\/)([A-Za-z0-9_]{4,}bot)(?![A-Za-z0-9_])/gi)]
+      .map((m) => m[1])
+      .find((u) => u.toLowerCase() !== publicBotUsername.toLowerCase());
+    if (!found) {
+      throw new Error(`/mybot no devolvió ningún bot: ${(message.message ?? "").slice(0, 200)}`);
+    }
+    return found;
   });
 }

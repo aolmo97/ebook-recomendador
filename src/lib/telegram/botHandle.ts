@@ -31,9 +31,8 @@ export async function getBotHandle(): Promise<string> {
   return `@${await getBotUsername()}`;
 }
 
-/** Lee la web, extrae el bot en español y lo persiste. Devuelve el username. */
-export async function refreshBotUsername(): Promise<{ username: string; previous: string }> {
-  const previous = await getBotUsername();
+/** Lee la web y devuelve el bot público en español (puerta de entrada, no sirve para buscar). */
+export async function fetchPublicBotUsername(): Promise<string> {
   const res = await fetch(SOURCE_URL, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`La web respondió ${res.status}`);
   const html = await res.text();
@@ -43,12 +42,14 @@ export async function refreshBotUsername(): Promise<{ username: string; previous
   // La página lista un bot por idioma; el catalán no sirve para este uso.
   const spanish = unique.find((u) => !/catala/i.test(u)) ?? unique[0];
   if (!spanish) throw new Error("No se encontró ningún bot de Telegram en la página");
+  return spanish;
+}
 
+export async function saveBotUsername(username: string): Promise<void> {
   await prisma.setting.upsert({
     where: { key: SETTING_KEY },
-    create: { key: SETTING_KEY, value: spanish },
-    update: { value: spanish },
+    create: { key: SETTING_KEY, value: username },
+    update: { value: username },
   });
-  cached = spanish;
-  return { username: spanish, previous };
+  cached = username;
 }
